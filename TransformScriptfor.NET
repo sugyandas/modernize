@@ -1,0 +1,45 @@
+#!/bin/bash
+set -e
+LOGFILE=modernization.log
+exec > >(tee -a $LOGFILE) 2>&1
+echo "Starting modernization script..."
+
+# Set variables
+WORKSPACE_NAME="dotnet-modernization"
+DESCRIPTION="Modernizing legacy .NET Framework app"
+REPO_URL="https://github.com/sugyandas/modernize.git"
+BRANCH_NAME="main"
+TARGET_BRANCH="modernized-dotnet"
+OUTPUT_REPO_URL="https://github.com/sugyandas/modernize.git"
+
+# Create workspace
+echo "Running: aws transform create-workspace   --workspace-name "$WORKSPACE_NAME"   --description "$DESCRIPTION""
+aws transform create-workspace   --workspace-name "$WORKSPACE_NAME"   --description "$DESCRIPTION" || { echo "Error executing: aws transform create-workspace   --workspace-name "$WORKSPACE_NAME"   --description "$DESCRIPTION""; exit 1; }
+
+# Capture workspace ID
+WORKSPACE_ID=$(aws transform list-workspaces --query "workspaces[?name=='$WORKSPACE_NAME'].id" --output text)
+
+# Create connector
+echo "Running: aws transform create-connector   --workspace-id "$WORKSPACE_ID"   --connector-type GITHUB   --repository-url "$REPO_URL"   --branch-name "$BRANCH_NAME""
+aws transform create-connector   --workspace-id "$WORKSPACE_ID"   --connector-type GITHUB   --repository-url "$REPO_URL"   --branch-name "$BRANCH_NAME" || { echo "Error executing: aws transform create-connector   --workspace-id "$WORKSPACE_ID"   --connector-type GITHUB   --repository-url "$REPO_URL"   --branch-name "$BRANCH_NAME""; exit 1; }
+
+# Capture connector ID
+CONNECTOR_ID=$(aws transform list-connectors --workspace-id "$WORKSPACE_ID" --query "connectors[?repositoryUrl=='$REPO_URL'].id" --output text)
+
+# Create transformation job
+echo "Running: aws transform create-job   --workspace-id "$WORKSPACE_ID"   --job-name "dotnet-refactor-job"   --job-type DOTNET_MODERNIZATION   --source-connector-id "$CONNECTOR_ID"   --target-branch "$TARGET_BRANCH"   --output-repository-url "$OUTPUT_REPO_URL""
+aws transform create-job   --workspace-id "$WORKSPACE_ID"   --job-name "dotnet-refactor-job"   --job-type DOTNET_MODERNIZATION   --source-connector-id "$CONNECTOR_ID"   --target-branch "$TARGET_BRANCH"   --output-repository-url "$OUTPUT_REPO_URL" || { echo "Error executing: aws transform create-job   --workspace-id "$WORKSPACE_ID"   --job-name "dotnet-refactor-job"   --job-type DOTNET_MODERNIZATION   --source-connector-id "$CONNECTOR_ID"   --target-branch "$TARGET_BRANCH"   --output-repository-url "$OUTPUT_REPO_URL""; exit 1; }
+
+# Capture job ID
+JOB_ID=$(aws transform list-jobs --workspace-id "$WORKSPACE_ID" --query "jobs[?name=='dotnet-refactor-job'].id" --output text)
+
+# Monitor job status
+echo "Running: aws transform describe-job   --workspace-id "$WORKSPACE_ID"   --job-id "$JOB_ID""
+aws transform describe-job   --workspace-id "$WORKSPACE_ID"   --job-id "$JOB_ID" || { echo "Error executing: aws transform describe-job   --workspace-id "$WORKSPACE_ID"   --job-id "$JOB_ID""; exit 1; }
+
+# List reports
+REPORT_ID=$(aws transform list-job-reports --workspace-id "$WORKSPACE_ID" --job-id "$JOB_ID" --query "reports[0].id" --output text)
+
+# Download report
+echo "Running: aws transform get-job-report   --workspace-id "$WORKSPACE_ID"   --job-id "$JOB_ID"   --report-id "$REPORT_ID"   --output-format PDF   --output-path ./modernization-report.pdf"
+aws transform get-job-report   --workspace-id "$WORKSPACE_ID"   --job-id "$JOB_ID"   --report-id "$REPORT_ID"   --output-format PDF   --output-path ./modernization-report.pdf || { echo "Error executing: aws transform get-job-report   --workspace-id "$WORKSPACE_ID"   --job-id "$JOB_ID"   --report-id "$REPORT_ID"   --output-format PDF   --output-path ./modernization-report.pdf"; exit 1; }
